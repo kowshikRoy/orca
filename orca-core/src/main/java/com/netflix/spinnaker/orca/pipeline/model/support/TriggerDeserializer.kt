@@ -20,6 +20,7 @@ import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.databind.DeserializationContext
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer
+import com.fasterxml.jackson.databind.exc.MismatchedInputException
 import com.netflix.spinnaker.orca.api.pipeline.models.PipelineExecution
 import com.netflix.spinnaker.orca.api.pipeline.models.Trigger
 import com.netflix.spinnaker.orca.pipeline.model.ArtifactoryTrigger
@@ -31,48 +32,21 @@ import com.netflix.spinnaker.orca.pipeline.model.JenkinsTrigger
 import com.netflix.spinnaker.orca.pipeline.model.NexusTrigger
 import com.netflix.spinnaker.orca.pipeline.model.PipelineTrigger
 import com.netflix.spinnaker.orca.pipeline.model.PluginTrigger
+import org.slf4j.LoggerFactory
 
 class TriggerDeserializer :
   StdDeserializer<Trigger>(Trigger::class.java) {
 
   companion object {
+    private val log = LoggerFactory.getLogger(TriggerDeserializer::class.java)
     val customTriggerSuppliers: MutableSet<CustomTriggerDeserializerSupplier> = mutableSetOf()
   }
 
   override fun deserialize(parser: JsonParser, context: DeserializationContext): Trigger =
     parser.codec.readTree<JsonNode>(parser).run {
-      return when {
-        looksLikeDocker() -> DockerTrigger(
-          get("type").textValue(),
-          get("correlationId")?.textValue(),
-          get("user")?.textValue() ?: "[anonymous]",
-          get("parameters")?.mapValue(parser) ?: mutableMapOf(),
-          get("artifacts")?.listValue(parser) ?: mutableListOf(),
-          get("notifications")?.listValue(parser) ?: mutableListOf(),
-          get("rebake")?.booleanValue() == true,
-          get("dryRun")?.booleanValue() == true,
-          get("strategy")?.booleanValue() == true,
-          get("account").textValue(),
-          get("repository").textValue(),
-          get("tag").textValue()
-        )
-        looksLikeConcourse() ->
-          ConcourseTrigger(
-            get("type").textValue(),
-            get("correlationId")?.textValue(),
-            get("user")?.textValue() ?: "[anonymous]",
-            get("parameters")?.mapValue(parser) ?: mutableMapOf(),
-            get("artifacts")?.listValue(parser) ?: mutableListOf(),
-            get("notifications")?.listValue(parser) ?: mutableListOf(),
-            get("rebake")?.booleanValue() == true,
-            get("dryRun")?.booleanValue() == true,
-            get("strategy")?.booleanValue() == true
-          ).apply {
-            buildInfo = get("buildInfo")?.parseValue(parser)
-            properties = get("properties")?.parseValue(parser) ?: mutableMapOf()
-          }
-        looksLikeJenkins() ->
-          JenkinsTrigger(
+      try {
+        return when {
+          looksLikeDocker() -> DockerTrigger(
             get("type").textValue(),
             get("correlationId")?.textValue(),
             get("user")?.textValue() ?: "[anonymous]",
@@ -82,106 +56,140 @@ class TriggerDeserializer :
             get("rebake")?.booleanValue() == true,
             get("dryRun")?.booleanValue() == true,
             get("strategy")?.booleanValue() == true,
-            get("master").textValue(),
-            get("job").textValue(),
-            get("buildNumber").intValue(),
-            get("propertyFile")?.textValue()
-          ).apply {
-            buildInfo = get("buildInfo")?.parseValue(parser)
-            properties = get("properties")?.mapValue(parser) ?: mutableMapOf()
+            get("account").textValue(),
+            get("repository").textValue(),
+            get("tag").textValue()
+          )
+          looksLikeConcourse() ->
+            ConcourseTrigger(
+              get("type").textValue(),
+              get("correlationId")?.textValue(),
+              get("user")?.textValue() ?: "[anonymous]",
+              get("parameters")?.mapValue(parser) ?: mutableMapOf(),
+              get("artifacts")?.listValue(parser) ?: mutableListOf(),
+              get("notifications")?.listValue(parser) ?: mutableListOf(),
+              get("rebake")?.booleanValue() == true,
+              get("dryRun")?.booleanValue() == true,
+              get("strategy")?.booleanValue() == true
+            ).apply {
+              buildInfo = get("buildInfo")?.parseValue(parser)
+              properties = get("properties")?.parseValue(parser) ?: mutableMapOf()
+            }
+          looksLikeJenkins() ->
+            JenkinsTrigger(
+              get("type").textValue(),
+              get("correlationId")?.textValue(),
+              get("user")?.textValue() ?: "[anonymous]",
+              get("parameters")?.mapValue(parser) ?: mutableMapOf(),
+              get("artifacts")?.listValue(parser) ?: mutableListOf(),
+              get("notifications")?.listValue(parser) ?: mutableListOf(),
+              get("rebake")?.booleanValue() == true,
+              get("dryRun")?.booleanValue() == true,
+              get("strategy")?.booleanValue() == true,
+              get("master").textValue(),
+              get("job").textValue(),
+              get("buildNumber").intValue(),
+              get("propertyFile")?.textValue()
+            ).apply {
+              buildInfo = get("buildInfo")?.parseValue(parser)
+              properties = get("properties")?.mapValue(parser) ?: mutableMapOf()
+            }
+          looksLikePipeline() -> PipelineTrigger(
+            get("type").textValue(),
+            get("correlationId")?.textValue(),
+            get("user")?.textValue() ?: "[anonymous]",
+            get("parameters")?.mapValue(parser) ?: mutableMapOf(),
+            get("artifacts")?.listValue(parser) ?: mutableListOf(),
+            get("notifications")?.listValue(parser) ?: mutableListOf(),
+            get("rebake")?.booleanValue() == true,
+            get("dryRun")?.booleanValue() == true,
+            get("strategy")?.booleanValue() == true,
+            get("parentExecution").parseValue<PipelineExecution>(parser),
+            get("parentPipelineStageId")?.textValue()
+          )
+          looksLikeArtifactory() -> ArtifactoryTrigger(
+            get("type").textValue(),
+            get("correlationId")?.textValue(),
+            get("user")?.textValue() ?: "[anonymous]",
+            get("parameters")?.mapValue(parser) ?: mutableMapOf(),
+            get("artifacts")?.listValue(parser) ?: mutableListOf(),
+            get("notifications")?.listValue(parser) ?: mutableListOf(),
+            get("rebake")?.booleanValue() == true,
+            get("dryRun")?.booleanValue() == true,
+            get("strategy")?.booleanValue() == true,
+            get("artifactorySearchName").textValue()
+          )
+          looksLikeNexus() -> NexusTrigger(
+            get("type").textValue(),
+            get("correlationId")?.textValue(),
+            get("user")?.textValue() ?: "[anonymous]",
+            get("parameters")?.mapValue(parser) ?: mutableMapOf(),
+            get("artifacts")?.listValue(parser) ?: mutableListOf(),
+            get("notifications")?.listValue(parser) ?: mutableListOf(),
+            get("rebake")?.booleanValue() == true,
+            get("dryRun")?.booleanValue() == true,
+            get("strategy")?.booleanValue() == true,
+            get("nexusSearchName").textValue()
+          )
+          looksLikeGit() -> GitTrigger(
+            get("type").textValue(),
+            get("correlationId")?.textValue(),
+            get("user")?.textValue() ?: "[anonymous]",
+            get("parameters")?.mapValue(parser) ?: mutableMapOf(),
+            get("artifacts")?.listValue(parser) ?: mutableListOf(),
+            get("notifications")?.listValue(parser) ?: mutableListOf(),
+            get("rebake")?.booleanValue() == true,
+            get("dryRun")?.booleanValue() == true,
+            get("strategy")?.booleanValue() == true,
+            get("hash").textValue(),
+            get("source").textValue(),
+            get("project").textValue(),
+            get("branch").textValue(),
+            get("slug").textValue(),
+            get("action")?.textValue() ?: "undefined"
+          )
+          looksLikePlugin() -> PluginTrigger(
+            get("type").textValue(),
+            get("correlationId")?.textValue(),
+            get("user")?.textValue() ?: "[anonymous]",
+            get("parameters")?.mapValue(parser) ?: mutableMapOf(),
+            get("artifacts")?.listValue(parser) ?: mutableListOf(),
+            get("notifications")?.listValue(parser) ?: mutableListOf(),
+            get("rebake")?.booleanValue() == true,
+            get("dryRun")?.booleanValue() == true,
+            get("strategy")?.booleanValue() == true,
+            get("pluginId").textValue(),
+            get("description")?.textValue() ?: "[no description]",
+            get("provider")?.textValue() ?: "[no provider]",
+            get("version").textValue(),
+            get("releaseDate").textValue(),
+            get("requires").listValue(parser),
+            get("binaryUrl").textValue(),
+            get("preferred").booleanValue()
+          )
+          looksLikeCustom() -> {
+            // chooses the first custom deserializer to keep behavior consistent
+            // with the rest of this conditional
+            customTriggerSuppliers.first { it.predicate.invoke(this) }.deserializer.invoke(this)
           }
-        looksLikePipeline() -> PipelineTrigger(
-          get("type").textValue(),
-          get("correlationId")?.textValue(),
-          get("user")?.textValue() ?: "[anonymous]",
-          get("parameters")?.mapValue(parser) ?: mutableMapOf(),
-          get("artifacts")?.listValue(parser) ?: mutableListOf(),
-          get("notifications")?.listValue(parser) ?: mutableListOf(),
-          get("rebake")?.booleanValue() == true,
-          get("dryRun")?.booleanValue() == true,
-          get("strategy")?.booleanValue() == true,
-          get("parentExecution").parseValue<PipelineExecution>(parser),
-          get("parentPipelineStageId")?.textValue()
-        )
-        looksLikeArtifactory() -> ArtifactoryTrigger(
-          get("type").textValue(),
-          get("correlationId")?.textValue(),
-          get("user")?.textValue() ?: "[anonymous]",
-          get("parameters")?.mapValue(parser) ?: mutableMapOf(),
-          get("artifacts")?.listValue(parser) ?: mutableListOf(),
-          get("notifications")?.listValue(parser) ?: mutableListOf(),
-          get("rebake")?.booleanValue() == true,
-          get("dryRun")?.booleanValue() == true,
-          get("strategy")?.booleanValue() == true,
-          get("artifactorySearchName").textValue()
-        )
-        looksLikeNexus() -> NexusTrigger(
-          get("type").textValue(),
-          get("correlationId")?.textValue(),
-          get("user")?.textValue() ?: "[anonymous]",
-          get("parameters")?.mapValue(parser) ?: mutableMapOf(),
-          get("artifacts")?.listValue(parser) ?: mutableListOf(),
-          get("notifications")?.listValue(parser) ?: mutableListOf(),
-          get("rebake")?.booleanValue() == true,
-          get("dryRun")?.booleanValue() == true,
-          get("strategy")?.booleanValue() == true,
-          get("nexusSearchName").textValue()
-        )
-        looksLikeGit() -> GitTrigger(
-          get("type").textValue(),
-          get("correlationId")?.textValue(),
-          get("user")?.textValue() ?: "[anonymous]",
-          get("parameters")?.mapValue(parser) ?: mutableMapOf(),
-          get("artifacts")?.listValue(parser) ?: mutableListOf(),
-          get("notifications")?.listValue(parser) ?: mutableListOf(),
-          get("rebake")?.booleanValue() == true,
-          get("dryRun")?.booleanValue() == true,
-          get("strategy")?.booleanValue() == true,
-          get("hash").textValue(),
-          get("source").textValue(),
-          get("project").textValue(),
-          get("branch").textValue(),
-          get("slug").textValue(),
-          get("action")?.textValue() ?: "undefined"
-        )
-        looksLikePlugin() -> PluginTrigger(
-          get("type").textValue(),
-          get("correlationId")?.textValue(),
-          get("user")?.textValue() ?: "[anonymous]",
-          get("parameters")?.mapValue(parser) ?: mutableMapOf(),
-          get("artifacts")?.listValue(parser) ?: mutableListOf(),
-          get("notifications")?.listValue(parser) ?: mutableListOf(),
-          get("rebake")?.booleanValue() == true,
-          get("dryRun")?.booleanValue() == true,
-          get("strategy")?.booleanValue() == true,
-          get("pluginId").textValue(),
-          get("description")?.textValue() ?: "[no description]",
-          get("provider")?.textValue() ?: "[no provider]",
-          get("version").textValue(),
-          get("releaseDate").textValue(),
-          get("requires").listValue(parser),
-          get("binaryUrl").textValue(),
-          get("preferred").booleanValue()
-        )
-        looksLikeCustom() -> {
-          // chooses the first custom deserializer to keep behavior consistent
-          // with the rest of this conditional
-          customTriggerSuppliers.first { it.predicate.invoke(this) }.deserializer.invoke(this)
+          else -> DefaultTrigger(
+            get("type")?.textValue() ?: "none",
+            get("correlationId")?.textValue(),
+            get("user")?.textValue() ?: "[anonymous]",
+            get("parameters")?.mapValue(parser) ?: mutableMapOf(),
+            get("artifacts")?.listValue(parser) ?: mutableListOf(),
+            get("notifications")?.listValue(parser) ?: mutableListOf(),
+            get("rebake")?.booleanValue() == true,
+            get("dryRun")?.booleanValue() == true,
+            get("strategy")?.booleanValue() == true
+          )
+        }.apply {
+          mapValue<Any>(parser).forEach { (k, v) -> other[k] = v }
+          resolvedExpectedArtifacts = get("resolvedExpectedArtifacts")?.listValue(parser) ?: mutableListOf()
         }
-        else -> DefaultTrigger(
-          get("type")?.textValue() ?: "none",
-          get("correlationId")?.textValue(),
-          get("user")?.textValue() ?: "[anonymous]",
-          get("parameters")?.mapValue(parser) ?: mutableMapOf(),
-          get("artifacts")?.listValue(parser) ?: mutableListOf(),
-          get("notifications")?.listValue(parser) ?: mutableListOf(),
-          get("rebake")?.booleanValue() == true,
-          get("dryRun")?.booleanValue() == true,
-          get("strategy")?.booleanValue() == true
-        )
-      }.apply {
-        mapValue<Any>(parser).forEach { (k, v) -> other[k] = v }
-        resolvedExpectedArtifacts = get("resolvedExpectedArtifacts")?.listValue(parser) ?: mutableListOf()
+      } catch (e: MismatchedInputException) {
+        log.error("Caught exception when trying to read {} from {}", e.targetType.canonicalName, this)
+        throw e
       }
     }
 

@@ -31,7 +31,7 @@ import com.netflix.spinnaker.orca.clouddriver.tasks.instance.WaitForDownInstance
 import com.netflix.spinnaker.orca.clouddriver.tasks.instance.WaitForTerminatedInstancesTask;
 import com.netflix.spinnaker.orca.clouddriver.tasks.servergroup.CaptureParentInterestingHealthProviderNamesTask;
 import com.netflix.spinnaker.orca.clouddriver.tasks.servergroup.ServerGroupCacheForceRefreshTask;
-import com.netflix.spinnaker.orca.kato.tasks.DisableInstancesTask;
+import com.netflix.spinnaker.orca.kato.tasks.DisableInstancesTaskGrab;
 import com.netflix.spinnaker.orca.kato.tasks.rollingpush.*;
 import com.netflix.spinnaker.orca.pipeline.tasks.WaitTask;
 import java.util.Map;
@@ -69,7 +69,7 @@ public class RollingPushStage implements StageDefinitionBuilder, ForceCacheRefre
               }
 
               subGraph
-                  .withTask("disableInstances", DisableInstancesTask.class)
+                  .withTask("disableInstances", DisableInstancesTaskGrab.class)
                   .withTask("monitorDisable", MonitorKatoTask.class)
                   .withTask("waitForDisabledState", WaitForDownInstanceHealthTask.class)
                   .withTask("terminateInstances", TerminateInstancesTask.class)
