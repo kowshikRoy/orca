@@ -18,7 +18,10 @@ package com.netflix.spinnaker.orca.clouddriver.pipeline.servergroup.strategies
 
 import com.netflix.spinnaker.kork.exceptions.UserException
 import com.netflix.spinnaker.orca.api.pipeline.models.StageExecution
+import com.netflix.spinnaker.orca.clouddriver.pipeline.servergroup.ResizeServerGroupStage
 import com.netflix.spinnaker.orca.clouddriver.pipeline.servergroup.UpdateLaunchTemplateStage
+import com.netflix.spinnaker.orca.clouddriver.pipeline.servergroup.support.TargetServerGroup
+import com.netflix.spinnaker.orca.clouddriver.utils.OortHelper
 import com.netflix.spinnaker.orca.kato.pipeline.ModifyAsgLaunchConfigurationStage
 import com.netflix.spinnaker.orca.kato.pipeline.RollingPushStage
 import com.netflix.spinnaker.orca.kato.pipeline.support.SourceResolver
@@ -39,6 +42,12 @@ class RollingPushStrategy implements Strategy {
 
   @Autowired
   UpdateLaunchTemplateStage updateLaunchTemplateStage
+
+  @Autowired
+  ResizeServerGroupStage resizeServerGroupStage
+
+  @Autowired
+  OortHelper oortHelper
 
   @Autowired
   RollingPushStage rollingPushStage
@@ -90,6 +99,43 @@ class RollingPushStrategy implements Strategy {
       SyntheticStageOwner.STAGE_AFTER
     )
 
+    def sourceServerGroup = oortHelper.getTargetServerGroup(
+        source.account,
+        source.asgName,
+        source.region,
+        stage.context.cloudProvider
+    ).orElse(null)
+
+    if(!sourceServerGroup) {
+      throw new UserException("Could not find source server group for rolling push. Does the specified cluster exist?")
+    }
+
+    def resizeCtx = [
+        serverGroupName: source.asgName,
+        credentials: source.account,
+        cloudprovider: stage.context.cloudProvider,
+        asgName: source.asgName,
+        moniker: stage.context.moniker,
+        region: source.region,
+        targetLocation: [
+            type: 'REGION',
+            value: 'ap-southeast-1'
+        ],
+        capacity: [
+            min: sourceServerGroup.capacity.min + 1,
+            max: sourceServerGroup.capacity.max + 1,
+            desired: sourceServerGroup.capacity.desired + 1
+        ]
+    ]
+    stages << StageExecutionFactory.newStage(
+      stage.execution,
+      resizeServerGroupStage.type,
+      "Increase ASG capacity by 1",
+      resizeCtx,
+      stage,
+      SyntheticStageOwner.STAGE_AFTER
+    )
+
     def terminationConfig = stage.mapTo("/termination", TerminationConfig)
     if (terminationConfig.relaunchAllInstances || terminationConfig.totalRelaunches > 0) {
       stages << StageExecutionFactory.newStage(
@@ -101,6 +147,22 @@ class RollingPushStrategy implements Strategy {
         SyntheticStageOwner.STAGE_AFTER
       )
     }
+
+    resizeCtx = resizeCtx + [
+        capacity: [
+            min: sourceServerGroup.capacity.min,
+            max: sourceServerGroup.capacity.max
+        ]
+    ]
+
+    stages << StageExecutionFactory.newStage(
+      stage.execution,
+      resizeServerGroupStage.type,
+      "Increase ASG capacity by 1",
+      resizeCtx,
+      stage,
+      SyntheticStageOwner.STAGE_AFTER
+    )
 
     return stages
   }
