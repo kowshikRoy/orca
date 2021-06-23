@@ -122,7 +122,7 @@ class RollingPushStrategy implements Strategy {
             value: source.region
         ],
         capacity: [
-            min: sourceServerGroup.capacity.min + terminationConfig.concurrentRelaunches,
+            min: sourceServerGroup.capacity.desired + terminationConfig.concurrentRelaunches,
             max: sourceServerGroup.capacity.max + terminationConfig.concurrentRelaunches,
             desired: sourceServerGroup.capacity.desired + terminationConfig.concurrentRelaunches
         ]
