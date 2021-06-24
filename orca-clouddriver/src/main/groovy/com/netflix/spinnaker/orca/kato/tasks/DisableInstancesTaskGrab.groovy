@@ -16,6 +16,7 @@
 
 package com.netflix.spinnaker.orca.kato.tasks
 
+import com.google.gson.Gson
 import com.netflix.spinnaker.orca.api.pipeline.Task
 import com.netflix.spinnaker.orca.api.pipeline.TaskResult
 import com.netflix.spinnaker.orca.api.pipeline.models.ExecutionStatus
@@ -39,6 +40,9 @@ class DisableInstancesTaskGrab implements CloudProviderAware, Task {
   @Autowired
   TrafficGuard trafficGuard
 
+  @Autowired
+  Gson gson
+
   @Nonnull
   @Override
   TaskResult execute(@Nonnull StageExecution stage) {
@@ -57,7 +61,21 @@ class DisableInstancesTaskGrab implements CloudProviderAware, Task {
         cloudProvider,
         "Disabling the requested instances in")
 
-    def actions = [[deregisterInstancesFromLoadBalancer: stage.context]]
+    def loadBalancers = stage.context.getOrDefault("loadBalancers", []) as List<String>
+    def targetGroupNames = stage.context.getOrDefault("targetGroupNames",[]) as List<String>
+
+    def actions = []
+    if (loadBalancers && targetGroupNames) {
+      def jsonString = gson.toJson(stage.context);
+      def context = gson.fromJson(jsonString, new TypeToken<Map<String, PersonData>>(){}.getType())
+      context.remove("targetGroupNames")
+      actions += ([deregisterInstancesFromLoadBalancer: context])
+
+      context = gson.fromJson(jsonString, new TypeToken<Map<String, PersonData>>(){}.getType())
+      context.remove("loadBalancers")
+      actions += ([deregisterInstancesFromLoadBalancer: context])
+    }
+    else actions = [[deregisterInstancesFromLoadBalancer: stage.context]]
     def taskId = katoService.requestOperations(actions)
 
     TaskResult.builder(ExecutionStatus.SUCCEEDED).context([
